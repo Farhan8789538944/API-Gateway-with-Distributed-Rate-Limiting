@@ -1,0 +1,18 @@
+{
+  "duration_s": 29.7,
+  "users": 0,
+  "wait_mode": "none",
+  "total_requests": 7312,
+  "achieved_rps_total": 245.8,
+  "achieved_rps_success": 245.8,
+  "outcomes": {
+    "success": 7312
+  },
+  "success_latency_ms": {
+    "count": 7312,
+    "p50": 67.33,
+    "p95": 218.94,
+    "p99": 340.02,
+    "max": 732.38
+  }
+}

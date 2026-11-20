@@ -1,0 +1,10 @@
+benchmark keys issued (not printed)
+== 1-direct-baseline: 20 users, ProductReadUser -> http://product-1:8000, wait=none
+== 2-one-gateway: 20 users, ProductReadUser -> http://gateway-1:8000, wait=none
+== 3-two-gateways-reads: 20 users, ProductReadUser -> http://nginx:80, wait=none
+== 4-product-order-mix: 20 users, MixedUser -> http://nginx:80, wait=none
+== 5-quota-exhaustion: 20 users, ProductReadUser -> http://nginx:80, wait=throughput:10
+== 6-slow-backend-overload: 80 users, ProductReadUser -> http://gateway-1:8000, wait=throughput:10
+raw results: load_tests\results\20261121-010336
+
+[exited with code 0]

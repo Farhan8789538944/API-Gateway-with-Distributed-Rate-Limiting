@@ -1,0 +1,12 @@
+apigw-test-locust-run-6c7d2a42d420	23.64%	44.04MiB / 512MiB
+apigw-test-gateway-1-1	20.23%	49.78MiB / 256MiB
+apigw-test-gateway-2-1	21.06%	49.86MiB / 256MiB
+apigw-test-orders-1	0.88%	37.27MiB / 256MiB
+apigw-test-product-1-1	6.75%	38.6MiB / 256MiB
+apigw-test-product-2-1	29.26%	40.05MiB / 256MiB
+apigw-test-nginx-1	5.42%	2.871MiB / 64MiB
+apigw-test-redis-1	5.96%	5.191MiB / 256MiB
+apigw-test-postgres-1	16.66%	110.3MiB / 512MiB
+gamepulseai-db-1	0.00%	66.06MiB / 7.622GiB
+bims-frontend	0.00%	10.84MiB / 7.622GiB
+bims-backend	0.00%	28.06MiB / 7.622GiB

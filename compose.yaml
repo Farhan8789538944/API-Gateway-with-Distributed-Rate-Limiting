@@ -1,0 +1,228 @@
+# Normal local deployment. Only Nginx is published (on 127.0.0.1). Backends,
+# gateways, PostgreSQL and Redis are reachable only on the private network.
+# Extra access for tests/benchmarks is opt-in via compose.test.yaml.
+name: apigw
+
+x-python-service: &python-service
+  build: .
+  image: apigw-python:0.1.0
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 15s
+  deploy:
+    resources:
+      limits: { cpus: "1.0", memory: 256m }
+
+x-app-env: &app-env
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  EXPOSE_INSTANCE_HEADERS: ${EXPOSE_INSTANCE_HEADERS:-false}
+  DB_POOL_MAX: "10"
+  DB_ACQUIRE_TIMEOUT_S: "1.0"
+  DB_COMMAND_TIMEOUT_S: "2.0"
+
+x-service-healthcheck: &live-healthcheck
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"]
+  interval: 5s
+  timeout: 3s
+  retries: 5
+  start_period: 10s
+
+x-gateway-env: &gateway-env
+  <<: *app-env
+  DATABASE_URL: postgresql://gateway_app:${GATEWAY_DB_PASSWORD:?set GATEWAY_DB_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-apigw}
+  REDIS_URL: redis://redis:6379/0
+  PRODUCTS_UPSTREAMS: product-1=http://product-1:8000,product-2=http://product-2:8000
+  ORDERS_UPSTREAMS: orders=http://orders:8000
+  GLOBAL_MAX_IN_FLIGHT: "100"
+  PRODUCTS_MAX_IN_FLIGHT: "50"
+  ORDERS_MAX_IN_FLIGHT: "20"
+  MAX_REQUEST_BODY_BYTES: "65536"
+  MAX_RESPONSE_BODY_BYTES: "1048576"
+  BODY_READ_TIMEOUT_S: "5"
+  UPSTREAM_DEADLINE_S: "5"
+  UPSTREAM_CONNECT_TIMEOUT_S: "1"
+  UPSTREAM_READ_TIMEOUT_S: "5"
+  UPSTREAM_WRITE_TIMEOUT_S: "2"
+  UPSTREAM_POOL_TIMEOUT_S: "0.5"
+  REDIS_MAX_CONNECTIONS: "20"
+  REDIS_SOCKET_TIMEOUT_S: "0.5"
+  REDIS_POOL_TIMEOUT_S: "0.5"
+  HEALTH_INTERVAL_S: "2"
+  HEALTH_TIMEOUT_S: "0.5"
+  HEALTH_FAILURE_THRESHOLD: "2"
+  HEALTH_RECOVERY_THRESHOLD: "2"
+  METRICS_PORT: "9100"
+
+x-gateway-command: &gateway-command
+  - uvicorn
+  - --factory
+  - gateway.app.main:create_app_from_env
+  - --host=0.0.0.0
+  - --port=8000
+  - --no-access-log
+  - --no-server-header
+  - --timeout-keep-alive=5
+  - --limit-concurrency=150      # > GLOBAL_MAX_IN_FLIGHT (+ Nginx keepalive connections)
+  - --backlog=256
+  - --timeout-graceful-shutdown=10
+
+services:
+  postgres:
+    image: postgres:17.7-alpine@sha256:bb377b7239d2774ac8cc76f481596ce96c5a6b5e9d141f6d0a0ee371a6e7c0f2
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-apigw_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-apigw}
+    command: ["postgres", "-c", "max_connections=100", "-c", "statement_timeout=5000"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    deploy:
+      resources:
+        limits: { memory: 512m }
+
+  redis:
+    image: redis:8.2-alpine@sha256:da23c2478319ceb4903857d77a2fd7aa5137d9e9d4c8165dafbacedac6403e95
+    restart: unless-stopped
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./config/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    deploy:
+      resources:
+        limits: { memory: 256m }
+
+  # One-shot, explicit database setup: migrations (under an advisory lock),
+  # role passwords and idempotent seeds. Applications never migrate themselves.
+  setup:
+    <<: *python-service
+    restart: "no"
+    command: ["python", "-m", "database.manage", "setup"]
+    environment:
+      ADMIN_DATABASE_URL: postgresql://${POSTGRES_USER:-apigw_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-apigw}
+      GATEWAY_DB_PASSWORD: ${GATEWAY_DB_PASSWORD}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?set CATALOG_DB_PASSWORD in .env}
+      ORDERS_DB_PASSWORD: ${ORDERS_DB_PASSWORD:?set ORDERS_DB_PASSWORD in .env}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  product-1: &product
+    <<: *python-service
+    # Backend keep-alive (5 s) > gateway HTTPX keepalive_expiry (2 s).
+    command: ["uvicorn", "--factory", "services.products.app:create_app_from_env",
+              "--host=0.0.0.0", "--port=8000", "--no-access-log", "--no-server-header",
+              "--timeout-keep-alive=5", "--limit-concurrency=120", "--backlog=256",
+              "--timeout-graceful-shutdown=10"]
+    environment: &product-env
+      <<: *app-env
+      INSTANCE_ID: product-1
+      DATABASE_URL: postgresql://catalog_app:${CATALOG_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-apigw}
+      DEV_CONTROLS_ENABLED: "false"
+    healthcheck: *live-healthcheck
+    depends_on:
+      setup: { condition: service_completed_successfully }
+
+  product-2:
+    <<: *product
+    environment:
+      <<: *product-env
+      INSTANCE_ID: product-2
+
+  orders:
+    <<: *python-service
+    # Backend keep-alive (5 s) > gateway HTTPX keepalive_expiry (2 s).
+    command: ["uvicorn", "--factory", "services.orders.app:create_app_from_env",
+              "--host=0.0.0.0", "--port=8000", "--no-access-log", "--no-server-header",
+              "--timeout-keep-alive=5", "--limit-concurrency=120", "--backlog=256",
+              "--timeout-graceful-shutdown=10"]
+    environment:
+      <<: *app-env
+      INSTANCE_ID: orders
+      DATABASE_URL: postgresql://orders_app:${ORDERS_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-apigw}
+      DEV_CONTROLS_ENABLED: "false"
+    healthcheck: *live-healthcheck
+    depends_on:
+      setup: { condition: service_completed_successfully }
+
+  gateway-1: &gateway
+    <<: *python-service
+    command: *gateway-command
+    environment:
+      <<: *gateway-env
+      INSTANCE_ID: gateway-1
+    healthcheck: *live-healthcheck
+    depends_on:
+      setup: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      product-1: { condition: service_healthy }
+      product-2: { condition: service_healthy }
+      orders: { condition: service_healthy }
+
+  gateway-2:
+    <<: *gateway
+    environment:
+      <<: *gateway-env
+      INSTANCE_ID: gateway-2
+
+  nginx:
+    image: nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
+    restart: unless-stopped
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:${GATEWAY_HTTP_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/nginx-health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    depends_on:
+      gateway-1: { condition: service_healthy }
+      gateway-2: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 64m }
+
+  # ---- optional profiles -------------------------------------------------
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v3.7.3@sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"   # UI on localhost only; gateway metrics stay internal
+    depends_on: [gateway-1, gateway-2]
+
+  admin:
+    profiles: ["tools"]
+    <<: *python-service
+    restart: "no"
+    entrypoint: ["python", "-m", "gateway.admin"]
+    command: ["--help"]
+    environment:
+      ADMIN_DATABASE_URL: postgresql://${POSTGRES_USER:-apigw_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-apigw}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  locust:
+    profiles: ["loadtest"]
+    image: locustio/locust:2.47.0@sha256:90fdf5b9632e67bb556d17784095652871be68318c5074731d911d4caaa42cc3
+    volumes:
+      - ./load_tests:/mnt/locust
+    working_dir: /mnt/locust
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 512m }
+
+volumes:
+  pgdata:
+  redisdata:

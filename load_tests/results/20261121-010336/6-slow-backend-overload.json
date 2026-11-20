@@ -1,0 +1,19 @@
+{
+  "duration_s": 29.8,
+  "users": 0,
+  "wait_mode": "throughput:10",
+  "total_requests": 7495,
+  "achieved_rps_total": 251.8,
+  "achieved_rps_success": 108.0,
+  "outcomes": {
+    "capacity_rejected": 4279,
+    "success": 3216
+  },
+  "success_latency_ms": {
+    "count": 3216,
+    "p50": 411.71,
+    "p95": 1296.48,
+    "p99": 1888.12,
+    "max": 3559.17
+  }
+}

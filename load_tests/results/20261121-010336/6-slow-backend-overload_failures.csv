@@ -1,0 +1,3 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+GET,/products,CatchResponseError('capacity_rejected'),419,2026-11-20T19:37:55Z,2026-11-20T19:38:24Z
+GET,/products/{id},CatchResponseError('capacity_rejected'),3748,2026-11-20T19:37:55Z,2026-11-20T19:38:24Z

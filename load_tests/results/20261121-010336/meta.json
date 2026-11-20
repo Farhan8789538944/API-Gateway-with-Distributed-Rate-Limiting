@@ -1,0 +1,9 @@
+{
+  "run_id": "20261121-010336",
+  "users_default": 20,
+  "warmup_s": 10,
+  "measured_s": 30,
+  "docker": "12 CPUs, 8184336384 bytes memory, Docker Desktop, engine 29.8.0",
+  "host_cpu": "12th Gen Intel(R) Core(TM) i5-1235U",
+  "host_memory_gb": 15.7
+}

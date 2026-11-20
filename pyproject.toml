@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "api-gateway"
+version = "0.1.0"
+description = "API Gateway with Distributed Rate Limiting: scalable request routing and backend load management"
+requires-python = ">=3.12,<3.13"
+# Direct runtime dependencies, pinned exactly. The fully resolved, hash-pinned
+# set (including transitive dependencies) lives in requirements.lock.
+dependencies = [
+    "fastapi==0.165.0",
+    "uvicorn==0.54.0",
+    "httpx==0.28.1",
+    "asyncpg==0.32.0",
+    "redis==8.1.0",
+    "anyio==4.16.0",
+    "prometheus-client==0.26.0",
+    # Faster event loop / HTTP parser inside Linux containers only.
+    "uvloop==0.23.0; sys_platform != 'win32'",
+    "httptools==0.9.0; sys_platform != 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.2.0",
+    "ruff==0.17.6",
+]
+
+[tool.setuptools.packages.find]
+include = ["gateway*", "services*", "shared*", "database*"]
+
+[tool.setuptools.package-data]
+"gateway.app.ratelimit" = ["*.lua"]
+"database" = ["migrations/*.sql", "seeds/*.sql"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "S", "SIM", "RUF"]
+ignore = [
+    "S101",   # assert is fine in tests
+    "S311",   # random is only used for non-security purposes (load tests, jitter)
+    "S608",   # SQL is parameterized; identifiers are constants
+    "RUF012",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S603", "S607", "ASYNC"]
+"scripts/**" = ["S603", "S607"]
+"load_tests/**" = ["S"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: needs the isolated test Compose stack (scripts/test_stack.ps1 up)",
+    "disruptive: stops/starts containers of the isolated test stack and restores them",
+]
+filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]

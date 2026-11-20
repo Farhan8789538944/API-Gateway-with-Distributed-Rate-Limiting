@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Benchmark scratch output (curated results are committed under docs/benchmarks/)
+load_tests/results/tmp/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
